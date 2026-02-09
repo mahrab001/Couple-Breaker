@@ -80,7 +80,7 @@
         <div id="start-screen" class="message-box">
             <h1>Couple Breaker</h1>
             <p>You are single. They are happy. <br>Don't let them pass!</p>
-            <p><strong>Tap screen to throw condoms!</strong><br><small>Avoid hitting Pharmacies (-5 pts)</small></p>
+            <p><strong>Tap screen to throw condoms!</strong><br><small>Avoid hitting Pharmacies (-5 pts)</small><br><small style="color:red">Game Over if Score hits -50</small></p>
             <button id="start-btn">Start Running</button>
         </div>
         <div id="game-over-screen" class="message-box" style="display: none;">
@@ -142,14 +142,52 @@
 
     // --- Audio System ---
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const HIT_TEXT = "valobasar mayr chudi";
-
+    
+    // General speak function (interrupts previous) - Used for Game Over
     function speak(text) {
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
             const msg = new SpeechSynthesisUtterance(text);
-            msg.rate = 2.5; 
-            msg.pitch = 1.2; 
+            msg.rate = 1.0; 
+            msg.pitch = 1.0; 
+            
+            // Try to set Bengali voice for Game Over text as well to ensure correct pronunciation
+            const voices = window.speechSynthesis.getVoices();
+            let selectedVoice = voices.find(v => v.lang.includes('bn'));
+            if (!selectedVoice) selectedVoice = voices.find(v => v.lang.includes('hi'));
+            if (selectedVoice) msg.voice = selectedVoice;
+
+            window.speechSynthesis.speak(msg);
+        }
+    }
+
+    // Dipjal specific speak function (Queues, does NOT interrupt)
+    function speakDipjal() {
+        if ('speechSynthesis' in window) {
+            // Iconic Dipjal Dialogues in Bengali - Only keeping the requested line
+            const text = "আহো ভাতিজা আহো!";
+            
+            const msg = new SpeechSynthesisUtterance(text);
+            
+            // Dipjal Style Tuning
+            // Low pitch for the "raspy" villain voice
+            msg.pitch = 0.3; 
+            // INCREASED SPEED: Made it faster as requested
+            msg.rate = 1.1; 
+            
+            // Voice Selection Strategy
+            const voices = window.speechSynthesis.getVoices();
+            
+            // 1. Prioritize Bengali
+            let selectedVoice = voices.find(v => v.lang.includes('bn'));
+            
+            // 2. Fallback to Hindi (often sounds similar for this tone)
+            if (!selectedVoice) selectedVoice = voices.find(v => v.lang.includes('hi'));
+            
+            if (selectedVoice) {
+                msg.voice = selectedVoice;
+            }
+
             window.speechSynthesis.speak(msg);
         }
     }
@@ -194,6 +232,7 @@
     function startGame() {
         // WARM UP AUDIO ENGINES
         if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel(); // Clear any old queue
             const warmUp = new SpeechSynthesisUtterance(" ");
             warmUp.volume = 0;
             window.speechSynthesis.speak(warmUp);
@@ -240,7 +279,9 @@
         gameState = 'GAMEOVER';
         uiGameOver.style.display = 'block';
         finalScoreDisplay.innerText = score;
-        speak(HIT_TEXT);
+        
+        // Game Over phrase in Bengali
+        speak("ভালোবাসার মায়রে চুদি");
     }
 
     function createBgObject(xOffset) {
@@ -581,7 +622,11 @@
 
                         rocks.splice(j, 1);
                         j--; 
-                        // Note: Pharmacy doesn't break, it stays
+                        
+                        // Check for Score Limit Game Over
+                        if (score <= -50) {
+                            gameOver();
+                        }
                 }
             }
 
@@ -617,6 +662,7 @@
                 
                 if (dist < 30) {
                     // HIT!
+                    speakDipjal(); // Calls the queued Dipjal voice
                     
                     // Add particle effect (The text user wanted implied)
                     particles.push({
