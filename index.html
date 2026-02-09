@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Couple Breaker</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky Blue */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: manipulation; /* Prevent zooming on touch */
+        }
+        #gameCanvas {
+            display: block;
+            margin: 0 auto;
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F7FA 100%);
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        .message-box {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            pointer-events: auto;
+            border: 4px solid #333;
+        }
+        h1 { margin: 0 0 10px 0; color: #333; font-size: 2rem; }
+        p { margin: 0 0 20px 0; color: #555; font-size: 1.1rem; }
+        button {
+            padding: 12px 24px;
+            font-size: 1.2rem;
+            background-color: #FF5722;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.1s;
+            font-weight: bold;
+        }
+        button:active { transform: scale(0.95); }
+        #score-board {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            text-shadow: 2px 2px 0px white;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="score-board">Score: 0</div>
+
+    <div id="ui-layer">
+        <div id="start-screen" class="message-box">
+            <h1>Couple Breaker</h1>
+            <p>You are single. They are happy. <br>Don't let them pass!</p>
+            <p><strong>Click or Tap to throw rocks</strong></p>
+            <button onclick="startGame()">Start Running</button>
+        </div>
+        <div id="game-over-screen" class="message-box" style="display: none;">
+            <h1>Game Over!</h1>
+            <p>A couple escaped your wrath.</p>
+            <p>Final Score: <span id="final-score">0</span></p>
+            <button onclick="resetGame()">Play Again</button>
+        </div>
+    </div>
+
+<script>
+    // --- Configuration ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const uiStart = document.getElementById('start-screen');
+    const uiGameOver = document.getElementById('game-over-screen');
+    const scoreDisplay = document.getElementById('score-board');
+    const finalScoreDisplay = document.getElementById('final-score');
+
+    // Game State
+    let gameState = 'START'; // START, PLAYING, GAMEOVER
+    let score = 0;
+    let frames = 0;
+    let gameSpeed = 3;
+    let spawnRate = 120; // Frames between spawns
+
+    // Assets & Objects
+    let player = {
+        x: 50,
+        y: 0, // Set dynamically
+        width: 40,
+        height: 60,
+        color: '#333',
+        dy: 0,
+        jumpForce: 12,
+        grounded: true,
+        legAngle: 0
+    };
+
+    let rocks = [];
+    let couples = [];
+    let particles = []; // For "Bonk" text effects
+
+    // Resize handling
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        // Ground level is 80% down
+        player.y = canvas.height * 0.8 - player.height;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // --- Audio System (Synthesized to avoid loading errors) ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Prepare the utterance text once to avoid string alloc during gameplay
+    const HIT_TEXT = "valobasar mayr chudi";
+
+    function speak(text) {
+        if ('speechSynthesis' in window) {
+            // Cancel current speech immediately to start new one
+            window.speechSynthesis.cancel();
+            
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.rate = 2.5; // Made it even faster for immediate feedback
+            msg.pitch = 1.2; // Slightly higher pitch cuts through better
+            
+            window.speechSynthesis.speak(msg);
+        }
+    }
+
+    function playSound(type) {
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        if (type === 'throw') {
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            // Whoosh sound
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.2);
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+        }
+    }
+
+    // --- Game Logic ---
+
+    function startGame() {
+        // WARM UP AUDIO ENGINES
+        // This is crucial for reducing latency on the first hit
+        if ('speechSynthesis' in window) {
+            const warmUp = new SpeechSynthesisUtterance(" "); // Silent space
+            warmUp.volume = 0; // Silent
+            window.speechSynthesis.speak(warmUp);
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        gameState = 'PLAYING';
+        uiStart.style.display = 'none';
+        uiGameOver.style.display = 'none';
+        score = 0;
+        frames = 0;
+        gameSpeed = 3;
+        spawnRate = 120;
+        rocks = [];
+        couples = [];
+        particles = [];
+        scoreDisplay.innerText = "Score: " + score;
+        loop();
+    }
+
+    function resetGame() {
+        startGame();
+    }
+
+    function gameOver() {
+        gameState = 'GAMEOVER';
+        uiGameOver.style.display = 'block';
+        finalScoreDisplay.innerText = score;
+        speak(HIT_TEXT);
+    }
+
+    function spawnCouple() {
+        const height = 50;
+        couples.push({
+            x: canvas.width,
+            y: canvas.height * 0.8 - height,
+            width: 50,
+            height: height,
+            speed: gameSpeed,
+            color: '#FF69B4', // Pink
+            hit: false
+        });
+    }
+
+    function throwRock() {
+        if (gameState !== 'PLAYING') return;
+        
+        // Spawn rock at player position
+        rocks.push({
+            x: player.x + player.width,
+            y: player.y + player.height / 2,
+            radius: 8,
+            speed: 10,
+            vy: -2 // Slight arc
+        });
+        playSound('throw');
+    }
+
+    // Input Listeners
+    window.addEventListener('mousedown', throwRock);
+    window.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevent scroll
+        throwRock();
+    }, {passive: false});
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') throwRock();
+    });
+
+    // --- Rendering Helpers ---
+
+    function drawPlayer() {
+        // Legs (Running Animation - Dark Pants)
+        const legOffset = Math.sin(frames * 0.2) * 10;
+        ctx.strokeStyle = '#2F2F2F'; // Dark pants
+        ctx.lineWidth = 5;
+        
+        ctx.beginPath(); // Leg 1
+        ctx.moveTo(player.x + 20, player.y + 40);
+        ctx.lineTo(player.x + 20 - legOffset, player.y + 60);
+        ctx.stroke();
+
+        ctx.beginPath(); // Leg 2
+        ctx.moveTo(player.x + 20, player.y + 40);
+        ctx.lineTo(player.x + 20 + legOffset, player.y + 60);
+        ctx.stroke();
+
+        // Body (Brown Shirt from photo)
+        ctx.fillStyle = '#8B5A2B'; 
+        ctx.fillRect(player.x + 10, player.y + 15, 20, 25);
+
+        // Head (Skin Tone)
+        ctx.fillStyle = '#EAC086';
+        ctx.beginPath();
+        ctx.arc(player.x + 20, player.y + 10, 11, 0, Math.PI*2);
+        ctx.fill();
+
+        // Hair (Black, swept back style)
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(player.x + 20, player.y + 8, 11, Math.PI, 0); 
+        ctx.lineTo(player.x + 31, player.y + 6);
+        ctx.quadraticCurveTo(player.x + 20, player.y - 5, player.x + 9, player.y + 6);
+        ctx.fill();
+
+        // Glasses (Black Frames)
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.rect(player.x + 14, player.y + 8, 4, 3); // Left lens
+        ctx.rect(player.x + 22, player.y + 8, 4, 3); // Right lens
+        ctx.moveTo(player.x + 18, player.y + 9);
+        ctx.lineTo(player.x + 22, player.y + 9); // Bridge
+        ctx.stroke();
+
+        // Mustache (Small detail)
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(player.x + 17, player.y + 15);
+        ctx.quadraticCurveTo(player.x + 20, player.y + 14, player.x + 23, player.y + 15);
+        ctx.stroke();
+
+        // Arms (Shirt Sleeve + Hand)
+        // Back Arm
+        ctx.strokeStyle = '#8B5A2B'; // Shirt
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(player.x + 15, player.y + 18);
+        ctx.lineTo(player.x + 5, player.y + 25);
+        ctx.stroke();
+
+        // Front Arm (Throwing)
+        ctx.beginPath();
+        ctx.moveTo(player.x + 25, player.y + 18);
+        ctx.lineTo(player.x + 35, player.y + 22);
+        ctx.stroke();
+        
+        // Hand
+        ctx.fillStyle = '#EAC086';
+        ctx.beginPath();
+        ctx.arc(player.x + 37, player.y + 22, 3, 0, Math.PI*2);
+        ctx.fill();
+    }
+
+    function drawHeart(x, y, size) {
+        ctx.fillStyle = '#FF4081';
+        ctx.beginPath();
+        ctx.moveTo(x, y + size / 4);
+        ctx.quadraticCurveTo(x, y, x + size / 4, y);
+        ctx.quadraticCurveTo(x + size / 2, y, x + size / 2, y + size / 4);
+        ctx.quadraticCurveTo(x + size / 2, y, x + size * 3/4, y);
+        ctx.quadraticCurveTo(x + size, y, x + size, y + size / 4);
+        ctx.quadraticCurveTo(x + size, y + size / 2, x + size / 2, y + size * 0.8);
+        ctx.quadraticCurveTo(x, y + size / 2, x, y + size / 4);
+        ctx.fill();
+    }
+
+    function drawEnvironment() {
+        // Sky
+        // ctx.fillStyle is handled by canvas bg
+        
+        // Ground
+        const groundY = canvas.height * 0.8;
+        ctx.fillStyle = '#4CAF50';
+        ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+
+        // Moving ground details
+        ctx.fillStyle = '#388E3C';
+        const stripeWidth = 50;
+        const offset = (frames * gameSpeed) % (stripeWidth * 2);
+        for(let i = -1; i < canvas.width / stripeWidth + 1; i+=2) {
+            ctx.fillRect(i * stripeWidth - offset, groundY, 20, 10);
+        }
+    }
+
+    // --- Main Loop ---
+
+    function loop() {
+        if (gameState !== 'PLAYING') return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        drawEnvironment();
+
+        // Update & Draw Player
+        drawPlayer();
+
+        // Update & Draw Rocks
+        for (let i = 0; i < rocks.length; i++) {
+            let r = rocks[i];
+            r.x += r.speed;
+            r.y += r.vy;
+            r.vy += 0.1; // Gravity on rock
+
+            ctx.fillStyle = '#555';
+            ctx.beginPath();
+            ctx.arc(r.x, r.y, r.radius, 0, Math.PI*2);
+            ctx.fill();
+
+            // Remove if off screen
+            if (r.y > canvas.height * 0.8 || r.x > canvas.width) {
+                rocks.splice(i, 1);
+                i--;
+            }
+        }
+
+        // Spawn Couples
+        if (frames % spawnRate === 0) {
+            spawnCouple();
+            // Increase difficulty slightly
+            if (gameSpeed < 10) gameSpeed += 0.05;
+            if (spawnRate > 60) spawnRate--;
+        }
+
+        // Update & Draw Couples
+        for (let i = 0; i < couples.length; i++) {
+            let c = couples[i];
+            c.x -= c.speed;
+
+            // Draw Couple (Two stick figures holding hands + heart)
+            // Figure 1
+            ctx.fillStyle = 'blue'; 
+            ctx.fillRect(c.x, c.y + 20, 15, 30); // Body
+            ctx.beginPath(); ctx.arc(c.x + 7, c.y + 10, 8, 0, Math.PI*2); ctx.fill(); // Head
+            
+            // Figure 2
+            ctx.fillStyle = 'purple';
+            ctx.fillRect(c.x + 20, c.y + 20, 15, 30); // Body
+            ctx.beginPath(); ctx.arc(c.x + 27, c.y + 10, 8, 0, Math.PI*2); ctx.fill(); // Head
+
+            // Heart above them
+            drawHeart(c.x + 10, c.y - 15, 20);
+
+            // Collision Detection with Rocks
+            for (let j = 0; j < rocks.length; j++) {
+                let r = rocks[j];
+                let dist = Math.hypot(r.x - (c.x + 20), r.y - (c.y + 25));
+                
+                if (dist < 30) {
+                    // HIT!
+                    
+                    // Add particle effect (The text user wanted implied)
+                    particles.push({
+                        x: c.x,
+                        y: c.y,
+                        text: "💔 Break!",
+                        life: 30
+                    });
+                    
+                    couples.splice(i, 1);
+                    rocks.splice(j, 1);
+                    i--;
+                    j--; // adjust indices
+                    score++;
+                    scoreDisplay.innerText = "Score: " + score;
+                    break;
+                }
+            }
+
+            // Game Over Condition: Couple passes player
+            if (c.x + c.width < player.x) {
+                gameOver();
+            }
+        }
+
+        // Particles (Text effects)
+        for (let i = 0; i < particles.length; i++) {
+            let p = particles[i];
+            ctx.fillStyle = `rgba(255, 0, 0, ${p.life / 30})`;
+            ctx.font = '20px Arial';
+            ctx.fillText(p.text, p.x, p.y);
+            p.y -= 1;
+            p.life--;
+            if (p.life <= 0) {
+                particles.splice(i, 1);
+                i--;
+            }
+        }
+
+        frames++;
+        requestAnimationFrame(loop);
+    }
+
+</script>
+</body>
+</html>
