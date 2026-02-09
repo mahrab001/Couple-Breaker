@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Couple Breaker</title>
     <style>
         body {
@@ -11,7 +11,11 @@
             overflow: hidden;
             background-color: #87CEEB; /* Sky Blue */
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            touch-action: manipulation; /* Prevent zooming on touch */
+            /* CRITICAL FOR MOBILE: Disables browser gestures like scroll/zoom */
+            touch-action: none; 
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
         #gameCanvas {
             display: block;
@@ -32,18 +36,19 @@
             text-align: center;
         }
         .message-box {
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             padding: 20px 40px;
             border-radius: 15px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
             pointer-events: auto;
             border: 4px solid #333;
+            max-width: 80%; /* Prevent overflow on small screens */
         }
         h1 { margin: 0 0 10px 0; color: #333; font-size: 2rem; }
         p { margin: 0 0 20px 0; color: #555; font-size: 1.1rem; }
         button {
-            padding: 12px 24px;
-            font-size: 1.2rem;
+            padding: 15px 30px; /* Larger touch target */
+            font-size: 1.3rem;
             background-color: #FF5722;
             color: white;
             border: none;
@@ -51,6 +56,7 @@
             cursor: pointer;
             transition: transform 0.1s;
             font-weight: bold;
+            touch-action: manipulation;
         }
         button:active { transform: scale(0.95); }
         #score-board {
@@ -74,14 +80,14 @@
         <div id="start-screen" class="message-box">
             <h1>Couple Breaker</h1>
             <p>You are single. They are happy. <br>Don't let them pass!</p>
-            <p><strong>Click or Tap to throw rocks</strong></p>
-            <button onclick="startGame()">Start Running</button>
+            <p><strong>Tap screen to throw rocks</strong></p>
+            <button id="start-btn">Start Running</button>
         </div>
         <div id="game-over-screen" class="message-box" style="display: none;">
             <h1>Game Over!</h1>
             <p>A couple escaped your wrath.</p>
             <p>Final Score: <span id="final-score">0</span></p>
-            <button onclick="resetGame()">Play Again</button>
+            <button id="restart-btn">Play Again</button>
         </div>
     </div>
 
@@ -93,6 +99,10 @@
     const uiGameOver = document.getElementById('game-over-screen');
     const scoreDisplay = document.getElementById('score-board');
     const finalScoreDisplay = document.getElementById('final-score');
+    
+    // Buttons
+    const startBtn = document.getElementById('start-btn');
+    const restartBtn = document.getElementById('restart-btn');
 
     // Game State
     let gameState = 'START'; // START, PLAYING, GAMEOVER
@@ -116,7 +126,7 @@
 
     let rocks = [];
     let couples = [];
-    let particles = []; // For "Bonk" text effects
+    let particles = []; 
 
     // Resize handling
     function resize() {
@@ -128,21 +138,16 @@
     window.addEventListener('resize', resize);
     resize();
 
-    // --- Audio System (Synthesized to avoid loading errors) ---
+    // --- Audio System ---
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-    // Prepare the utterance text once to avoid string alloc during gameplay
     const HIT_TEXT = "valobasar mayr chudi";
 
     function speak(text) {
         if ('speechSynthesis' in window) {
-            // Cancel current speech immediately to start new one
             window.speechSynthesis.cancel();
-            
             const msg = new SpeechSynthesisUtterance(text);
-            msg.rate = 2.5; // Made it even faster for immediate feedback
-            msg.pitch = 1.2; // Slightly higher pitch cuts through better
-            
+            msg.rate = 2.5; 
+            msg.pitch = 1.2; 
             window.speechSynthesis.speak(msg);
         }
     }
@@ -155,11 +160,9 @@
         if (type === 'throw') {
             const osc = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
-
             osc.connect(gainNode);
             gainNode.connect(audioCtx.destination);
 
-            // Whoosh sound
             osc.type = 'triangle';
             osc.frequency.setValueAtTime(400, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.2);
@@ -174,10 +177,9 @@
 
     function startGame() {
         // WARM UP AUDIO ENGINES
-        // This is crucial for reducing latency on the first hit
         if ('speechSynthesis' in window) {
-            const warmUp = new SpeechSynthesisUtterance(" "); // Silent space
-            warmUp.volume = 0; // Silent
+            const warmUp = new SpeechSynthesisUtterance(" ");
+            warmUp.volume = 0;
             window.speechSynthesis.speak(warmUp);
         }
         if (audioCtx.state === 'suspended') {
@@ -201,6 +203,14 @@
     function resetGame() {
         startGame();
     }
+    
+    // Attach Listeners to buttons directly for better mobile response
+    startBtn.addEventListener('click', startGame);
+    startBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); startGame(); }, {passive: true});
+    
+    restartBtn.addEventListener('click', resetGame);
+    restartBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); resetGame(); }, {passive: true});
+
 
     function gameOver() {
         gameState = 'GAMEOVER';
@@ -217,7 +227,7 @@
             width: 50,
             height: height,
             speed: gameSpeed,
-            color: '#FF69B4', // Pink
+            color: '#FF69B4', 
             hit: false
         });
     }
@@ -225,23 +235,28 @@
     function throwRock() {
         if (gameState !== 'PLAYING') return;
         
-        // Spawn rock at player position
         rocks.push({
             x: player.x + player.width,
             y: player.y + player.height / 2,
             radius: 8,
             speed: 10,
-            vy: -2 // Slight arc
+            vy: -2 
         });
         playSound('throw');
     }
 
     // Input Listeners
     window.addEventListener('mousedown', throwRock);
+    
+    // Improved Mobile Touch Listener
     window.addEventListener('touchstart', (e) => {
-        e.preventDefault(); // Prevent scroll
-        throwRock();
-    }, {passive: false});
+        // Only throw if we aren't tapping a button (buttons stop propagation, but just in case)
+        if (e.target.tagName !== 'BUTTON') {
+            e.preventDefault(); // Prevents scrolling/zooming/selecting
+            throwRock();
+        }
+    }, {passive: false}); // passive: false is required to use preventDefault
+
     window.addEventListener('keydown', (e) => {
         if (e.code === 'Space') throwRock();
     });
@@ -336,9 +351,6 @@
     }
 
     function drawEnvironment() {
-        // Sky
-        // ctx.fillStyle is handled by canvas bg
-        
         // Ground
         const groundY = canvas.height * 0.8;
         ctx.fillStyle = '#4CAF50';
