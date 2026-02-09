@@ -80,7 +80,7 @@
         <div id="start-screen" class="message-box">
             <h1>Couple Breaker</h1>
             <p>You are single. They are happy. <br>Don't let them pass!</p>
-            <p><strong>Tap screen to throw rocks</strong></p>
+            <p><strong>Tap screen to throw condoms!</strong><br><small>Avoid hitting Pharmacies (-5 pts)</small></p>
             <button id="start-btn">Start Running</button>
         </div>
         <div id="game-over-screen" class="message-box" style="display: none;">
@@ -126,6 +126,8 @@
 
     let rocks = [];
     let couples = [];
+    let pharmacies = [];
+    let bgObjects = []; // Hotels and Parks
     let particles = []; 
 
     // Resize handling
@@ -170,6 +172,20 @@
             gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
             osc.start();
             osc.stop(audioCtx.currentTime + 0.2);
+        } else if (type === 'bad') {
+             // Low buzz for hitting pharmacy
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.3);
+            gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.3);
         }
     }
 
@@ -195,8 +211,16 @@
         spawnRate = 120;
         rocks = [];
         couples = [];
+        pharmacies = [];
+        bgObjects = [];
         particles = [];
         scoreDisplay.innerText = "Score: " + score;
+        
+        // Initial Background
+        for(let i=0; i<5; i++) {
+            bgObjects.push(createBgObject(i * 300));
+        }
+        
         loop();
     }
 
@@ -219,6 +243,20 @@
         speak(HIT_TEXT);
     }
 
+    function createBgObject(xOffset) {
+        // Types: 'hotel', 'park'
+        const type = Math.random() > 0.5 ? 'hotel' : 'park';
+        const groundY = canvas.height * 0.8;
+        return {
+            type: type,
+            x: xOffset || canvas.width + Math.random() * 200,
+            y: groundY,
+            width: type === 'hotel' ? 80 + Math.random() * 40 : 100,
+            height: type === 'hotel' ? 150 + Math.random() * 100 : 120,
+            color: type === 'hotel' ? '#DDA0DD' : '#228B22' // Placeholder colors
+        };
+    }
+
     function spawnCouple() {
         const height = 50;
         couples.push({
@@ -228,6 +266,18 @@
             height: height,
             speed: gameSpeed,
             color: '#FF69B4', 
+            hit: false
+        });
+    }
+
+    function spawnPharmacy() {
+        const height = 60;
+        pharmacies.push({
+            x: canvas.width,
+            y: canvas.height * 0.8 - height,
+            width: 60,
+            height: height,
+            speed: gameSpeed, // Moves same speed as ground/couples
             hit: false
         });
     }
@@ -250,12 +300,11 @@
     
     // Improved Mobile Touch Listener
     window.addEventListener('touchstart', (e) => {
-        // Only throw if we aren't tapping a button (buttons stop propagation, but just in case)
         if (e.target.tagName !== 'BUTTON') {
-            e.preventDefault(); // Prevents scrolling/zooming/selecting
+            e.preventDefault(); 
             throwRock();
         }
-    }, {passive: false}); // passive: false is required to use preventDefault
+    }, {passive: false}); 
 
     window.addEventListener('keydown', (e) => {
         if (e.code === 'Space') throwRock();
@@ -337,6 +386,49 @@
         ctx.fill();
     }
 
+    function drawCondomPacket(x, y, radius) {
+        // Draw Gold Packet
+        ctx.fillStyle = '#FFD700'; // Gold
+        ctx.beginPath();
+        ctx.arc(x, y, radius + 2, 0, Math.PI*2);
+        ctx.fill();
+        
+        // Inner rim
+        ctx.strokeStyle = '#DAA520';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(x, y, radius - 2, 0, Math.PI*2);
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = '#000';
+        ctx.font = '8px Arial';
+        ctx.fillText("C", x-3, y+3);
+    }
+
+    function drawPharmacy(p) {
+        // Building
+        ctx.fillStyle = '#FFF';
+        ctx.fillRect(p.x, p.y, p.width, p.height);
+        
+        // Roof
+        ctx.fillStyle = '#AAA';
+        ctx.fillRect(p.x - 5, p.y, p.width + 10, 5);
+
+        // Green Cross
+        ctx.fillStyle = '#008000';
+        const cx = p.x + p.width / 2;
+        const cy = p.y + p.height / 3;
+        const size = 8;
+        ctx.fillRect(cx - size/2, cy - size*1.5, size, size*3); // Vertical
+        ctx.fillRect(cx - size*1.5, cy - size/2, size*3, size); // Horizontal
+
+        // Text
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 10px Arial';
+        ctx.fillText("PHARMACY", p.x + 2, p.y + p.height - 10);
+    }
+
     function drawHeart(x, y, size) {
         ctx.fillStyle = '#FF4081';
         ctx.beginPath();
@@ -351,6 +443,47 @@
     }
 
     function drawEnvironment() {
+        // Sky
+        // Handled by canvas bg
+
+        // Background Objects (Hotels, Parks)
+        bgObjects.forEach(obj => {
+            if (obj.type === 'hotel') {
+                ctx.fillStyle = '#9C27B0'; // Purple building
+                ctx.fillRect(obj.x, obj.y - obj.height, obj.width, obj.height);
+                
+                // Windows
+                ctx.fillStyle = '#FFEB3B'; // Light
+                for(let wy = obj.y - obj.height + 10; wy < obj.y; wy += 30) {
+                    for(let wx = obj.x + 10; wx < obj.x + obj.width - 10; wx += 20) {
+                        ctx.fillRect(wx, wy, 10, 15);
+                    }
+                }
+                
+                // Sign
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.fillText("HOTEL", obj.x + 5, obj.y - obj.height - 5);
+                
+            } else if (obj.type === 'park') {
+                // Trees
+                ctx.fillStyle = '#8B4513'; // Trunk
+                ctx.fillRect(obj.x + 20, obj.y - 40, 10, 40);
+                
+                ctx.fillStyle = '#228B22'; // Leaves
+                ctx.beginPath();
+                ctx.arc(obj.x + 25, obj.y - 50, 25, 0, Math.PI*2);
+                ctx.fill();
+
+                // Bench
+                ctx.fillStyle = '#5D4037';
+                ctx.fillRect(obj.x + 60, obj.y - 15, 30, 5); // Seat
+                ctx.fillRect(obj.x + 60, obj.y - 15, 4, 15); // Leg
+                ctx.fillRect(obj.x + 86, obj.y - 15, 4, 15); // Leg
+            }
+        });
+
+
         // Ground
         const groundY = canvas.height * 0.8;
         ctx.fillStyle = '#4CAF50';
@@ -372,22 +505,32 @@
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
+        // 1. Update Background Elements
+        if (frames % 200 === 0) { // Add new bg element
+             bgObjects.push(createBgObject());
+        }
+        for (let i = 0; i < bgObjects.length; i++) {
+            let bg = bgObjects[i];
+            bg.x -= gameSpeed * 0.5; // Parallax: moves slower than foreground
+            if (bg.x + bg.width < -100) {
+                bgObjects.splice(i, 1);
+                i--;
+            }
+        }
+
         drawEnvironment();
 
-        // Update & Draw Player
+        // 2. Update & Draw Player
         drawPlayer();
 
-        // Update & Draw Rocks
+        // 3. Update & Draw Projectiles (Condoms)
         for (let i = 0; i < rocks.length; i++) {
             let r = rocks[i];
             r.x += r.speed;
             r.y += r.vy;
             r.vy += 0.1; // Gravity on rock
 
-            ctx.fillStyle = '#555';
-            ctx.beginPath();
-            ctx.arc(r.x, r.y, r.radius, 0, Math.PI*2);
-            ctx.fill();
+            drawCondomPacket(r.x, r.y, r.radius);
 
             // Remove if off screen
             if (r.y > canvas.height * 0.8 || r.x > canvas.width) {
@@ -396,15 +539,59 @@
             }
         }
 
-        // Spawn Couples
+        // 4. Spawning Logic
         if (frames % spawnRate === 0) {
-            spawnCouple();
+            // Random chance to spawn pharmacy OR couple
+            if (Math.random() < 0.3) {
+                spawnPharmacy(); // 30% chance for pharmacy
+            } else {
+                spawnCouple();
+            }
+            
             // Increase difficulty slightly
             if (gameSpeed < 10) gameSpeed += 0.05;
             if (spawnRate > 60) spawnRate--;
         }
 
-        // Update & Draw Couples
+        // 5. Update & Draw Pharmacies
+        for (let i = 0; i < pharmacies.length; i++) {
+            let p = pharmacies[i];
+            p.x -= p.speed;
+            drawPharmacy(p);
+
+            // Collision with Rocks
+            for (let j = 0; j < rocks.length; j++) {
+                let r = rocks[j];
+                // Simple box collision for building
+                if (r.x > p.x && r.x < p.x + p.width && 
+                    r.y > p.y && r.y < p.y + p.height) {
+                        
+                        // Hit Pharmacy - Bad!
+                        score -= 5;
+                        playSound('bad');
+                        scoreDisplay.innerText = "Score: " + score;
+                        
+                        particles.push({
+                            x: p.x + p.width/2,
+                            y: p.y,
+                            text: "-5 Pts",
+                            color: 'red',
+                            life: 40
+                        });
+
+                        rocks.splice(j, 1);
+                        j--; 
+                        // Note: Pharmacy doesn't break, it stays
+                }
+            }
+
+            if (p.x + p.width < -50) {
+                pharmacies.splice(i, 1);
+                i--;
+            }
+        }
+
+        // 6. Update & Draw Couples
         for (let i = 0; i < couples.length; i++) {
             let c = couples[i];
             c.x -= c.speed;
@@ -436,6 +623,7 @@
                         x: c.x,
                         y: c.y,
                         text: "💔 Break!",
+                        color: 'white',
                         life: 30
                     });
                     
@@ -458,8 +646,11 @@
         // Particles (Text effects)
         for (let i = 0; i < particles.length; i++) {
             let p = particles[i];
-            ctx.fillStyle = `rgba(255, 0, 0, ${p.life / 30})`;
-            ctx.font = '20px Arial';
+            ctx.fillStyle = p.color || 'white';
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 3;
+            ctx.font = 'bold 20px Arial';
+            ctx.strokeText(p.text, p.x, p.y);
             ctx.fillText(p.text, p.x, p.y);
             p.y -= 1;
             p.life--;
